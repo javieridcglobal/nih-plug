@@ -9,6 +9,19 @@ use std::sync::Arc;
 use vizia::context::backend::TextConfig;
 use vizia::prelude::*;
 
+// Win32 DPI helper — compiled only for Windows targets.
+// The import library name is lowercase on MinGW ("user32"); the actual DLL is User32.dll.
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+extern "system" {
+    fn GetDpiForWindow(hwnd: *mut std::ffi::c_void) -> u32;
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn win32_get_dpi_for_window(hwnd: *mut std::ffi::c_void) -> u32 {
+    GetDpiForWindow(hwnd)
+}
+
 use crate::widgets::RawParamEvent;
 use crate::{assets, widgets, ViziaState, ViziaTheming};
 
@@ -43,8 +56,24 @@ impl Editor for ViziaEditor {
         let theming = self.theming;
 
         let (unscaled_width, unscaled_height) = vizia_state.inner_logical_size();
-        let system_scaling_factor = self.scaling_factor.load();
         let user_scale_factor = vizia_state.user_scale_factor();
+
+        // Use the host-reported scale factor when available. On Windows, fall back to the
+        // per-monitor DPI of the parent window so that 4K displays work correctly even when
+        // the host (e.g. certain Cubase versions) calls setContentScaleFactor after the
+        // editor is already open — by which point the guard in set_scale_factor() rejects it.
+        let system_scaling_factor = self.scaling_factor.load();
+        #[cfg(target_os = "windows")]
+        let system_scaling_factor = if system_scaling_factor.is_none() {
+            if let ParentWindowHandle::Win32Hwnd(hwnd) = parent {
+                let dpi = unsafe { win32_get_dpi_for_window(hwnd) };
+                if dpi > 0 { Some(dpi as f32 / 96.0) } else { None }
+            } else {
+                None
+            }
+        } else {
+            system_scaling_factor
+        };
 
         let mut application = Application::new(move |cx| {
             // Set some default styles to match the iced integration

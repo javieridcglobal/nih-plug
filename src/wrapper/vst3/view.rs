@@ -15,6 +15,23 @@ use super::util::{ObjectPtr, VstPtr};
 use crate::plugin::vst3::Vst3Plugin;
 use crate::prelude::{Editor, ParentWindowHandle};
 
+// Win32 DPI helper for the default scaling factor — compiled only on Windows.
+// Using GetDpiForSystem() (Windows 8.1+) avoids needing a window handle and gives
+// a reasonable initial value so that get_size() returns the correct physical pixels
+// even when the host calls setContentScaleFactor after the editor is already open.
+// The import library name is lowercase on MinGW ("user32"); the actual DLL is User32.dll.
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+extern "system" {
+    fn GetDpiForSystem() -> u32;
+}
+
+#[cfg(target_os = "windows")]
+fn windows_default_scaling_factor() -> f32 {
+    let dpi = unsafe { GetDpiForSystem() };
+    if dpi > 0 { dpi as f32 / 96.0 } else { 1.0 }
+}
+
 // Alias needed for the VST3 attribute macro
 use vst3_sys as vst3_com;
 
@@ -100,6 +117,14 @@ struct RunLoopEventHandler<P: Vst3Plugin> {
 
 impl<P: Vst3Plugin> WrapperView<P> {
     pub fn new(inner: Arc<WrapperInner<P>>, editor: Arc<Mutex<Box<dyn Editor>>>) -> Box<Self> {
+        // On Windows, pre-populate with the system DPI rather than 1.0.  This ensures
+        // get_size() returns the correct physical pixel dimensions even when the host calls
+        // setContentScaleFactor after the editor is already attached (or not at all).
+        #[cfg(target_os = "windows")]
+        let initial_scale = windows_default_scaling_factor();
+        #[cfg(not(target_os = "windows"))]
+        let initial_scale = 1.0f32;
+
         Self::allocate(
             inner,
             editor,
@@ -109,7 +134,7 @@ impl<P: Vst3Plugin> WrapperView<P> {
             RunLoopEventHandlerWrapper(RwLock::new(None)),
             #[cfg(not(target_os = "linux"))]
             RunLoopEventHandlerWrapper(Default::default()),
-            AtomicF32::new(1.0),
+            AtomicF32::new(initial_scale),
         )
     }
 
