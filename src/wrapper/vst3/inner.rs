@@ -157,6 +157,15 @@ pub enum Task<P: Plugin> {
     /// Request the editor to be resized according to its current size. Right now there is no way to
     /// handle "denied resize" requests yet.
     RequestResize,
+    /// Call `IComponentHandler::begin_edit()` from the main thread. Queued from the audio thread
+    /// when the plugin changes a parameter during processing (e.g. mapped MIDI CC); calling the
+    /// component handler directly from the audio thread violates the VST3 threading contract and
+    /// strict hosts like Cubase ignore or drop such calls.
+    BeginParamEdit(u32),
+    /// Call `IComponentHandler::perform_edit()` from the main thread. See [`Task::BeginParamEdit`].
+    PerformParamEdit(u32, f64),
+    /// Call `IComponentHandler::end_edit()` from the main thread. See [`Task::BeginParamEdit`].
+    EndParamEdit(u32),
 }
 
 /// VST3 makes audio processing pretty complicated. In order to support both block splitting for
@@ -647,6 +656,24 @@ impl<P: Vst3Plugin> MainThreadExecutor<Task<P>> for WrapperInner<P> {
                     nih_debug_assert!(success, "Failed requesting a window resize");
                 },
                 None => nih_debug_assert_failure!("Can't resize a closed editor"),
+            },
+            Task::BeginParamEdit(param_hash) => match &*self.component_handler.borrow() {
+                Some(handler) => unsafe {
+                    handler.begin_edit(param_hash);
+                },
+                None => nih_debug_assert_failure!("Component handler not yet set"),
+            },
+            Task::PerformParamEdit(param_hash, value) => match &*self.component_handler.borrow() {
+                Some(handler) => unsafe {
+                    handler.perform_edit(param_hash, value);
+                },
+                None => nih_debug_assert_failure!("Component handler not yet set"),
+            },
+            Task::EndParamEdit(param_hash) => match &*self.component_handler.borrow() {
+                Some(handler) => unsafe {
+                    handler.end_edit(param_hash);
+                },
+                None => nih_debug_assert_failure!("Component handler not yet set"),
             },
         }
     }
