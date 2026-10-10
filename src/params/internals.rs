@@ -74,9 +74,13 @@ impl ParamPtr {
     param_ptr_forward!(pub unsafe fn string_to_normalized_value(&self, string: &str) -> Option<f32>);
     param_ptr_forward!(pub unsafe fn flags(&self) -> ParamFlags);
 
-    param_ptr_forward!(pub(crate) unsafe fn set_normalized_value(&self, normalized: f32) -> bool);
+    // Rubigo patch: `set_normalized_value` and `update_smoother` are public so a plugin can change
+    // its own parameters from the audio thread without host edits (RB3 recalls a preset this way:
+    // one recorded "Preset" edit instead of ~25 edits the host would also record, which Cubase
+    // doesn't handle reliably). The host is not told; the caller owns that trade-off.
+    param_ptr_forward!(pub unsafe fn set_normalized_value(&self, normalized: f32) -> bool);
     param_ptr_forward!(pub(crate) unsafe fn modulate_value(&self, modulation_offset: f32) -> bool);
-    param_ptr_forward!(pub(crate) unsafe fn update_smoother(&self, sample_rate: f32, reset: bool));
+    param_ptr_forward!(pub unsafe fn update_smoother(&self, sample_rate: f32, reset: bool));
 
     // These functions involve casts since the plugin formats only do floating point types, so we
     // can't generate them with the macro:
